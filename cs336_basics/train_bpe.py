@@ -5,6 +5,8 @@ from multiprocessing import Process, Manager, Lock
 from pathlib import Path
 from collections import defaultdict
 import time
+from tqdm import tqdm
+from cs336_basics.utils.io import save_vocab_and_merge
 
 def find_chunk_boundaries(
     file: BinaryIO, 
@@ -91,24 +93,6 @@ def preTokenizeChunk(filePath: str | os.PathLike, start: int, end: int, special_
             lock.release()
             currentPtr += to_read
 
-def merge(words: dict[list[int], int], pair: tuple[int, int], new_index: int) -> dict[list[int], int]:
-    """
-    Merge the most common pair of tokens in the words dictionary.
-    """
-    new_words = defaultdict(int);
-    for word, count in words.items():
-        new_word = []
-        i = 0
-        while i < len(word):
-            if i < len(word) - 1 and (word[i], word[i + 1]) == pair:
-                new_word.append(new_index)
-                i += 2
-            else:
-                new_word.append(word[i])
-                i += 1
-        new_words[tuple(new_word)] = count
-    return new_words
-
 def get_most_frequent_pair(
     vocab: dict[int, bytes],
     pair_freqs: dict[tuple([int, int]), int]
@@ -192,7 +176,10 @@ def train_bpe(
     for p in processInstance:
         p.join()
 
-    start = time.time()
+    pretoken_end = time.time()  # End timing pre-tokenization
+    print(f"Time taken for pre-tokenization: {pretoken_end - pretoken_start:.2f} seconds")
+    print("Starting BPE merges, total unique words found in corpus:", len(preTokenMap))
+    merge_start_time = time.time()
     num_merges = vocab_size - 256 - len(special_tokens)
 
     merges: list[tuple[bytes, bytes]] = []
@@ -210,8 +197,9 @@ def train_bpe(
             continue
         for index1, index2 in zip(word, word[1:]):
             count[(index1, index2)] = count.get((index1, index2), 0) + appearances
-    
-    for merge_num in range(num_merges):
+
+
+    for merge_num in tqdm(range(num_merges), desc="Training BPE merges", unit="merge"):
         # Find the most frequent pair Lexicographically greatest pair
         freq_pair = get_most_frequent_pair(vocab, count)
         index1, index2 = freq_pair
@@ -222,10 +210,12 @@ def train_bpe(
         merges.append((vocab[index1], vocab[index2]))
         vocab[new_index] = vocab[index1] + vocab[index2]
         
-        
         new_pretoken_freq = {}
-        for word, appearances in converted_tokens.items():
-            if len(word) < 2:
+        are_all_words_merged = True
+        for word, appearances in tqdm(converted_tokens.items(), desc="Updating pre-token frequencies",colour='red', leave=False):
+            if len(word) > 1:
+                are_all_words_merged = False
+            else:
                 continue
             i = 0
             while i < len(word):
@@ -246,16 +236,24 @@ def train_bpe(
                     count[freq_pair] -= appearances
                 i+=1
             new_pretoken_freq[word] = appearances
+        if are_all_words_merged:
+            break
+
+        # Update the count dictionary to remove the merged pair
+        del count[freq_pair]
         converted_tokens = new_pretoken_freq
-    end = time.time()
-    print(f"Time taken for BPE merges: {end - start:.2f} seconds")
+    merge_end_time = time.time()
+    print(f"Time taken for BPE merges: {merge_end_time - merge_start_time:.2f} seconds")
 
     return vocab, merges
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent
-    path = path / 'data'/'owt_valid.txt'
-    path = 'data/small.txt'
-    result = train_bpe(path, vocab_size=270, special_tokens=["<|endoftext|>"])
-    print("Vocabulary:", result[0])
-    print("Merges:", result[1])
+    corpus_path = Path(__file__).parent.parent / 'corpus-samples' / 'owt_train.txt'
+    result = train_bpe(corpus_path, vocab_size=1, special_tokens=["<|endoftext|>"])
+    
+    # store results in a file
+    folder_path = Path(__file__).parent.parent / 'bpe_mappings'
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    save_vocab_and_merge(result[0], result[1], folder_path / 'vocab.json', folder_path / 'merges.txt')
+    print("Training complete. Vocab and merges saved.")
