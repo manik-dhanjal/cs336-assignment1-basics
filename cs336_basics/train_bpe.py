@@ -6,7 +6,7 @@ from pathlib import Path
 from collections import defaultdict
 import time
 from tqdm import tqdm
-from cs336_basics.utils.io import save_vocab_and_merge
+from cs336_basics.utils.io import save_vocab_and_merge, GPT2_PRETOKENIZER_PATTERN
 
 def find_chunk_boundaries(
     file: BinaryIO, 
@@ -61,7 +61,7 @@ def preTokenizeChunk(filePath: str | os.PathLike, start: int, end: int, special_
     print('Child Process Started', start, end)
     mini_chunk_size = 200 * 1024 * 1024  # Read ahead by 200MB at a time
     currentPtr = start
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    
 
     # Open in binary mode for accurate seeking and reading
     with open(filePath, 'rb') as file:
@@ -80,7 +80,7 @@ def preTokenizeChunk(filePath: str | os.PathLike, start: int, end: int, special_
             segments = re.split(split_regex, text)
             local_token_map = {}
             for segment in segments:
-                tokens = re.finditer(PAT, segment)
+                tokens = re.finditer(GPT2_PRETOKENIZER_PATTERN, segment)
                 for token_1 in tokens:
                     token = token_1.group()
                     word_in_int = tuple(map(int,token.encode('utf-8')))
@@ -248,12 +248,15 @@ def train_bpe(
     return vocab, merges
 
 if __name__ == '__main__':
-    corpus_path = Path(__file__).parent.parent / 'corpus-samples' / 'owt_train.txt'
-    result = train_bpe(corpus_path, vocab_size=1, special_tokens=["<|endoftext|>"])
-    
+    source_file_name = 'owt_train'
+    vocab_size = 10000
+
+    corpus_path = Path(__file__).parent.parent / 'corpus-samples' / f'{source_file_name}.txt'
+    result = train_bpe(corpus_path, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
+
     # store results in a file
     folder_path = Path(__file__).parent.parent / 'bpe_mappings'
     folder_path.mkdir(parents=True, exist_ok=True)
 
-    save_vocab_and_merge(result[0], result[1], folder_path / 'vocab.json', folder_path / 'merges.txt')
+    save_vocab_and_merge(result[0], result[1], folder_path / f'{source_file_name}_{vocab_size}_vocab.json', folder_path / f'{source_file_name}_{vocab_size}_merges.txt')
     print("Training complete. Vocab and merges saved.")
