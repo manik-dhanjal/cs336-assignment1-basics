@@ -92,6 +92,7 @@ class Tokenizer:
                 yield id
     
     
-    def decode(self, tokens: list[int]) -> str:
-        tokens_in_bytes = b''.join([ self.int_to_byte[token] for token in tokens])
+    def decode(self, tokens: list[int],  progress_bar: bool=False) -> str:
+        tokens_in_bytes = b''.join([ self.int_to_byte[token] for token in tqdm(tokens, disable=not progress_bar,
+                          desc=f"Decoding {len(tokens)} documents")])
         return tokens_in_bytes.decode('utf-8', errors='replace')
